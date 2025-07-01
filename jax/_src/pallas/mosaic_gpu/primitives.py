@@ -610,8 +610,6 @@ barrier_arrive_p.multiple_results = True
 def _barrier_arrive_abstract_eval(barrier, *args, **params):
   del args, params  # Unused.
   _check_ref(barrier, "barrier", gpu_core.SMEM)
-  if getattr(barrier.inner_aval.dtype, "for_tensor_core", False):
-    raise ValueError("Cannot arrive on a tensor core barrier.")
   return (), {gpu_core._memory_effect}
 
 
@@ -642,12 +640,19 @@ def _barrier_arrive_lowering(
     *flat_transforms,
     transforms_treedef,
 ):
-  del ctx  # Unused.
   transforms = transforms_treedef.unflatten(flat_transforms)
   indexer = _extract_barrier_indexer(transforms)
   if indexer is not None:
     barrier = barrier.__getitem__(*map(lowering._as_index, indexer.indices))
-  barrier.arrive()
+  if ctx.avals_in[0].inner_aval.dtype.orders_tensor_core:  # typing: ignore
+    if ctx.module_ctx.lowering_semantics == mgpu.LoweringSemantics.Warpgroup:
+      raise NotImplementedError("barrier_arrive on barriers with orders_tensor_core=True")
+    # We only do a single arrival for barriers with orders_tensor_core=True,
+    # so we need to perfom a separate warpgroup barrier.
+    mgpu_utils.warpgroup_barrier()
+    barrier.arrive(orders_tensor_core=True, predicate=ctx.module_ctx.single_lane_predicate)
+  else:
+    barrier.arrive()
   return ()
 
 
@@ -710,11 +715,11 @@ def _barrier_wait_lowering(
   barrier_aval = ctx.avals_in[0]
   transforms = transforms_treedef.unflatten(flat_transforms)
   indexer = _extract_barrier_indexer(transforms)
-  for_tensor_core = getattr(
-      barrier_aval.inner_aval.dtype, "for_tensor_core", False)
+  orders_tensor_core = getattr(
+      barrier_aval.inner_aval.dtype, "orders_tensor_core", False)
   if indexer is not None:
     barrier = barrier.__getitem__(*map(lowering._as_index, indexer.indices))
-  barrier.wait(for_tensor_core=for_tensor_core)
+  barrier.wait(orders_tensor_core=orders_tensor_core)
   return ()
 
 
@@ -1175,7 +1180,7 @@ def tcgen05_mma(acc: _Ref,
     a: The left-hand side. Must be a TMEM/SMEM Ref.
     b: The right-hand side. Must be an SMEM Ref.
     barrier: Optional barrier Ref for synchronizing with the tensor core.
-      Should have for_tensor_core set to True. If not specified, the MMA
+      Must have orders_tensor_core set to True. If not specified, the MMA
       completion should be explicitly observed by calling
       `tcgen05_commit_arrive`
     accumulate: Whether to accumulate into acc or overwrite it.
@@ -1275,10 +1280,10 @@ def _tcgen05_mma_abstract_eval(acc, a, b, accumulate,
 
   if arrive:
     barrier = barrier_and_transforms_leaves[0]
-    for_tensor_core = getattr(
-        barrier.inner_aval.dtype, "for_tensor_core", False)
-    if not for_tensor_core:
-      raise ValueError("MMA barrier must have for_tensor_core set to True.")
+    orders_tensor_core = getattr(
+        barrier.inner_aval.dtype, "orders_tensor_core", False)
+    if not orders_tensor_core:
+      raise ValueError("MMA barrier must have orders_tensor_core set to True.")
 
   return []
 
@@ -1443,8 +1448,8 @@ def tcgen05_commit_arrive(barrier: _Ref,
   """Arrive on a Barrier to track completion of a preceding `tcgen05_mma` call.
 
   Args:
-    barrier: Barrier Ref for synchronizing with the tensor core. Should have
-      for_tensor_core set to True.
+    barrier: Barrier Ref for synchronizing with the tensor core. Must have
+      orders_tensor_core set to True.
     collective_axis: The name of the cluster axis along which the
       MMA was performed if it was collective. The cluster axis should have a
       size of exactly 2, and must be on the minormost cluster axis.
@@ -1469,10 +1474,10 @@ def _tcgen05_commit_arrive_abstract_eval(barrier,
                                barrier_transforms_tree,
                                collective_axis):
   del (barrier_transforms_leaves, barrier_transforms_tree, collective_axis)
-  for_tensor_core = getattr(
-      barrier.inner_aval.dtype, "for_tensor_core", False)
-  if not for_tensor_core:
-    raise ValueError("MMA barrier must have for_tensor_core set to True.")
+  orders_tensor_core = getattr(
+      barrier.inner_aval.dtype, "orders_tensor_core", False)
+  if not orders_tensor_core:
+    raise ValueError("MMA barrier must have orders_tensor_core set to True.")
   return []
 
 
