@@ -65,6 +65,7 @@ from jax._src.numpy.reductions import (
     any as any,
     cumsum as cumsum,
     max as max,
+    sum as sum
 )
 
 from jax._src.numpy.tensor_contractions import (
@@ -75,6 +76,7 @@ from jax._src.numpy.ufuncs import (
     abs as abs,
     bitwise_and as bitwise_and,
     ceil as ceil,
+    divide as divide,
     equal as equal,
     exp as exp,
     floor as floor,
@@ -87,7 +89,10 @@ from jax._src.numpy.ufuncs import (
     logical_and as logical_and,
     logical_not as logical_not,
     logical_or as logical_or,
+    maximum as maximum,
+    minimum as minimum,
     power as power,
     sign as sign,
+    sin as sin,
     sqrt as sqrt,
 )
