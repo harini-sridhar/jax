@@ -285,7 +285,10 @@ FailureOr<SmallVector<Layout>> getInLayouts(
   FAILUREOR_ASSIGN_OR_RETURN(const SmallVector<Layout> in_layouts,
                              getLayoutArrayFromAttr(op.getAttr("in_layout")));
   if (in_layouts.size() != op.getNumOperands()) {
-    return op.emitOpError("in_layout size does not match number of operands");
+    return op.emitOpError("in_layout size does not match number of operands")
+           << " operands: " << op.getNumOperands()
+           << " vs layout size: " << in_layouts.size() << " for "
+           << op.getName();
   }
   for (const auto [l, operand] :
        llvm::zip_equal(in_layouts, op.getOperands())) {
